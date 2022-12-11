@@ -14,7 +14,7 @@
     {
         private static readonly ConcurrentDictionary<string, ISwitchBotDevice> DevicesValue = new ();
 
-        public IReadOnlyList<ISwitchBotDevice> Devices => this.DevicesValue.Select(x => x.Value).ToList();
+        public IReadOnlyList<ISwitchBotDevice> Devices => DevicesValue.Select(x => x.Value).ToList();
 
         public Task Discover() => FindDevices();
 
@@ -68,13 +68,13 @@
         private async Task<ISwitchBotDevice?> FetchDevice(string id)
         {
             await FindDevices(id);
-            this.DevicesValue.TryGetValue(id, out var device);
+            DevicesValue.TryGetValue(id, out var device);
             return device;
         }
 
         private async Task FindDevices(string? id = null)
         {
-            if (id != null && this.DevicesValue.ContainsKey(id))
+            if (id != null && DevicesValue.ContainsKey(id))
             {
                 return;
             }
@@ -129,7 +129,7 @@
 
                     if (switchBotDevice != null)
                     {
-                        this.DevicesValue.AddOrUpdate(device.Id, (i) => switchBotDevice, (i, d) => switchBotDevice);
+                        DevicesValue.AddOrUpdate(device.Id, (i) => switchBotDevice, (i, d) => switchBotDevice);
                     }
                 }
                 finally

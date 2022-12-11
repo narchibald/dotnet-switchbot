@@ -2,7 +2,7 @@
 {
     using System.Collections.Generic;
     using System.Threading.Tasks;
-    using Devices;
+    using global::SwitchBot.Api.Devices;
 
     public interface ISwitchBot
     {
