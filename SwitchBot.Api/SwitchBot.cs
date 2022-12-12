@@ -24,71 +24,23 @@
 
         public async Task<ICurtain?> GetCurtain(string id) => await FetchDevice(id) as ICurtain;
 
-        async Task<BluetoothDevice> ISwitchBotDeviceCommander.GetDevice(string id)
-        {
-            var wait = new AsyncManualResetEvent(false);
-            BluetoothDevice? foundDevice = null;
-
-            void AdvertisementReceivedHandler(object o, BluetoothAdvertisingEvent ef)
-            {
-                var device = ef.Device;
-                if (device.Id == id)
-                {
-                    foundDevice = device;
-                    wait.Set();
-                }
-            }
-
-            BluetoothLEScan? scan = null;
-            try
-            {
-                using var cancellation = new CancellationTokenSource();
-                Bluetooth.AdvertisementReceived += AdvertisementReceivedHandler;
-                scan = await Bluetooth.RequestLEScanAsync();
-                cancellation.CancelAfter(TimeSpan.FromSeconds(30));
-                await wait.WaitAsync(cancellation.Token);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            finally
-            {
-                Bluetooth.AdvertisementReceived -= AdvertisementReceivedHandler;
-                scan?.Stop();
-            }
-
-            if (foundDevice == null)
-            {
-                throw new DeviceNotFoundException(id);
-            }
-
-            return foundDevice;
-        }
+        async Task<BluetoothDevice> ISwitchBotDeviceCommander.GetDevice(string id) => await BluetoothDevice.FromIdAsync(id);
 
         private async Task<ISwitchBotDevice?> FetchDevice(string id)
         {
-            await FindDevices(id);
+            var bluetoothDevice = await ((ISwitchBotDeviceCommander)this).GetDevice(id);
+            await RegisterDevice(bluetoothDevice);
             DevicesValue.TryGetValue(id, out var device);
             return device;
         }
 
-        private async Task FindDevices(string? id = null)
+        private async Task FindDevices()
         {
-            if (id != null && DevicesValue.ContainsKey(id))
-            {
-                return;
-            }
-
-            var wait = new AsyncManualResetEvent(false);
             var foundDevices = new ConcurrentDictionary<string, BluetoothDevice>();
             void AdvertisementReceivedHandler(object o, BluetoothAdvertisingEvent ef)
             {
                 var device = ef.Device;
                 foundDevices.AddOrUpdate(device.Id, (i) => device, (i, d) => device);
-                if (id != null && device.Id == id)
-                {
-                    wait.Set();
-                }
             }
 
             BluetoothLEScan? scan = null;
@@ -98,7 +50,6 @@
                 Bluetooth.AdvertisementReceived += AdvertisementReceivedHandler;
                 scan = await Bluetooth.RequestLEScanAsync();
                 cancellation.CancelAfter(TimeSpan.FromSeconds(10));
-                await wait.WaitAsync(cancellation.Token);
             }
             catch (OperationCanceledException)
             {
@@ -112,32 +63,36 @@
             // work out what devices are the switch bot ones
             foreach (var foundDevice in foundDevices)
             {
-                var device = foundDevice.Value;
-                var gatt = device.Gatt;
+                RegisterDevice(foundDevice.Value);
+            }
+        }
 
-                await device.Gatt.ConnectAsync();
-                try
+        private async Task RegisterDevice(BluetoothDevice device)
+        {
+            var gatt = device.Gatt;
+
+            await device.Gatt.ConnectAsync();
+            try
+            {
+                var name = device.Name;
+                ISwitchBotDevice? switchBotDevice = name switch
                 {
-                    var name = device.Name;
-                    ISwitchBotDevice? switchBotDevice = name switch
-                    {
-                        "WoHand" => new Bot(device.Id, this),
-                        "WoBulb" => new Bulb(device.Id, this),
-                        "WoCurtain" => new Curtain(device.Id, this),
-                        _ => null
-                    };
+                    "WoHand" => new Bot(device.Id, this),
+                    "WoBulb" => new Bulb(device.Id, this),
+                    "WoCurtain" => new Curtain(device.Id, this),
+                    _ => null
+                };
 
-                    if (switchBotDevice != null)
-                    {
-                        DevicesValue.AddOrUpdate(device.Id, (i) => switchBotDevice, (i, d) => switchBotDevice);
-                    }
+                if (switchBotDevice != null)
+                {
+                    DevicesValue.AddOrUpdate(device.Id, (i) => switchBotDevice, (i, d) => switchBotDevice);
                 }
-                finally
+            }
+            finally
+            {
+                if (gatt.IsConnected)
                 {
-                    if (gatt.IsConnected)
-                    {
-                        gatt.Disconnect();
-                    }
+                    gatt.Disconnect();
                 }
             }
         }
